@@ -1,0 +1,95 @@
+---
+output:
+  pdf_document: default
+  html_document: default
+---
+Potential Nitrification Analysis
+
+```{r}
+library(tidyverse)
+```
+
+```{r}
+cn_raw <- read_csv("Data/Raw Data CN.csv")
+cn <- cn_raw %>%
+  select(Site, Core, `dry/wet`) %>%
+  mutate(Core = as.character(Core))
+potnit <- read_csv("Data/Raw Data Potental Nitrification.csv") %>%
+  mutate(...7 = NULL, ...8 = NULL, End_time = mdy_hm(End_time), Start_time = mdy_hm(Start_time), duration=End_time-Start_time) %>%
+  inner_join(cn) %>%
+  mutate(NO3_gdw = NO3/(`dry/wet`*Sample_weight)) %>%
+  group_by(Site) %>%
+  nest() %>%
+  filter(!is.na(Site)) %>%
+  mutate(plot = map(data, ~ ggplot(., aes(duration, NO3_gdw, color=Core))+geom_point()+ggtitle(Site)))
+walk(potnit$plot, print)
+```
+```{r}
+incubations <- read_csv("Data/Raw Data Incubations.csv")
+standards <- tibble(num = 1:3, curve = vector("list", 3));
+standards$curve[[1]] <- read_csv("Data/Standard 1.csv");
+standards$curve[[2]] <- read_csv("Data/Standard 2.csv");
+standards$curve[[3]] <- read_csv("Data/Standard 3.csv");
+standards <- unnest(standards, curve)
+require(broom)
+models <- standards %>% 
+  group_by(num) %>%
+  do(tidy(lm(data = ., formula = Absorbance ~ Concentration))) %>%
+  select(term, estimate) %>%
+  pivot_wider(names_from = term, values_from = estimate)
+```
+
+```{r}
+processed <- incubations %>%
+  inner_join(models, join_by(std_curve == num)) %>%
+  mutate(Core = as.character(Core)) %>%
+  inner_join(cn) %>%
+  mutate(amm_gdw = ((amm_raw_abs - `(Intercept)`)/Concentration * amm_dil)/(`dry/wet`*wet_weight),
+         NO3_gdw = NO3/(`dry/wet`*wet_weight)) %>%
+  select(-amm_raw_abs, -`(Intercept)`, -amm_dil, -Concentration, -std_curve, -NO3) %>%
+  mutate(end_date = mdy(end_date),
+         start_date = mdy(start_date),
+         duration = end_date - start_date)
+```
+```{r}
+calc_net_nit <- function(data){
+  transmute(Incubation, amm_gdw, NO3_gdw, duration,
+            net_nit = NO3_gdw - NO3_gdw[Incubation == 'Initial'])
+}
+
+rates <- processed %>%
+  select(Site, Core, Incubation, amm_gdw, NO3_gdw, duration) %>%
+  nest(.by = c(Site, Core)) %>%
+  mutate(data = map(data, ~ 
+                      .x %>%
+                      transmute(Incubation, amm_gdw, NO3_gdw, duration,
+                                net_no3 = (NO3_gdw - NO3_gdw[Incubation == 'Initial'])/as.numeric(duration, units = "days"),
+                                net_amm = (amm_gdw - amm_gdw[Incubation == 'Initial'])/as.numeric(duration, units = "days"))
+                      )) %>%
+  unnest(cols = data)
+
+amm_plot <- ggplot(rates, aes(x = Site, y = amm_gdw)) +
+  geom_col(aes(color = Core, fill = Core), position = position_dodge(0.8), width = 0.7) +
+  facet_wrap(~ Incubation, strip.position = "bottom") +
+  theme(strip.placement = "outside")
+no3_plot <- ggplot(rates, aes(x = Site, y = NO3_gdw)) +
+  geom_col(aes(color = Core, fill = Core), position = position_dodge(0.8), width = 0.7) +
+  facet_wrap(~ Incubation, strip.position = "bottom") +
+  theme(strip.placement = "outside")
+amm_change <- ggplot(filter(rates, Incubation != 'Initial'), aes(x = Site, y = net_amm)) +
+  geom_col(aes(color = Core, fill = Core), position = position_dodge(0.8), width = 0.7) +
+  facet_wrap(~ Incubation, strip.position = "bottom") +
+  theme(strip.placement = "outside")
+no3_change <- ggplot(filter(rates, Incubation != 'Initial'), aes(x = Site, y = net_no3)) +
+  geom_col(aes(color = Core, fill = Core), position = position_dodge(0.8), width = 0.7) +
+  facet_wrap(~ Incubation, strip.position = "bottom") +
+  theme(strip.placement = "outside")
+amm_plot
+no3_plot
+amm_change
+no3_change
+```
+
+
+
+

@@ -1,3 +1,4 @@
+.DS_Store
 # History files
 .Rhistory
 .Rapp.history
@@ -22,8 +23,9 @@
 .Rproj.user/
 
 # produced vignettes
-vignettes/*.html
-vignettes/*.pdf
+*.html
+*.pdf
+
 
 # OAuth2 token, see https://github.com/hadley/httr/releases/tag/v0.3
 .httr-oauth
