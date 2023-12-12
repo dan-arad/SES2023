@@ -8,6 +8,21 @@ Potential Nitrification Analysis
 
 ```{r}
 library(tidyverse)
+library(viridis)
+library(latex2exp)
+theme_set(theme_bw(base_size=12)+ 
+  theme_classic() + theme(
+    plot.title = element_text(size=14, face= "bold", hjust = 0.5),
+  axis.title.x = element_text(size=12, face="bold"),    
+  axis.title.y = element_text(size=12, face="bold"),
+  axis.text.x = element_text(size=9, face="bold"), 
+  axis.text.y = element_text(size=10, face="bold"),
+  strip.text.x = element_text(size = 12, face="bold"),
+  strip.text.y = element_text(size = 12, face="bold"),
+  axis.line.x = element_line(size = 0.3),
+  axis.line.y = element_line(size = 0.3),
+  panel.border = element_rect(fill=NA, size=0.3),
+))
 ```
 
 ```{r}
@@ -28,10 +43,10 @@ walk(potnit$plot, print)
 
 ```{r}
 incubations <- read_csv("Data/Raw Data Incubations.csv")
-standards <- tibble(num = 1:3, curve = vector("list", 3));
-standards$curve[[1]] <- read_csv("Data/Standard 1.csv");
-standards$curve[[2]] <- read_csv("Data/Standard 2.csv");
-standards$curve[[3]] <- read_csv("Data/Standard 3.csv");
+standards <- tibble(num = 1:3, curve = vector("list", 3))
+standards$curve[[1]] <- read_csv("Data/Standard 1.csv")
+standards$curve[[2]] <- read_csv("Data/Standard 2.csv")
+standards$curve[[3]] <- read_csv("Data/Standard 3.csv")
 standards <- unnest(standards, curve)
 require(broom)
 models <- standards %>% 
@@ -46,9 +61,9 @@ processed <- incubations %>%
   inner_join(models, join_by(std_curve == num)) %>%
   mutate(Core = as.character(Core)) %>%
   inner_join(cn) %>%
-  mutate(amm_gdw = ((amm_raw_abs - `(Intercept)`)/Concentration * amm_dil)/(`dry/wet`*wet_weight),
-         NO3_gdw = NO3/(`dry/wet`*wet_weight)) %>%
-  select(-amm_raw_abs, -`(Intercept)`, -amm_dil, -Concentration, -std_curve, -NO3) %>%
+  mutate(amm_gdw = ((amm_raw_abs - `(Intercept)`)/Concentration * amm_dil * (extract_vol+(1-`dry/wet`)*wet_weight))/(`dry/wet`*wet_weight*1000),
+         NO3_gdw = (NO3*(extract_vol+(1-`dry/wet`)*wet_weight))/(`dry/wet`*wet_weight*1000)) %>%
+  select(-amm_raw_abs, -`(Intercept)`, -amm_dil, -Concentration, -std_curve, -NO3, -extract_vol) %>%
   mutate(end_date = mdy(end_date),
          start_date = mdy(start_date),
          duration = end_date - start_date)
@@ -62,28 +77,59 @@ rates <- processed %>%
                       .x %>%
                       transmute(Incubation, amm_gdw, NO3_gdw, duration,
                                 net_no3 = (NO3_gdw - NO3_gdw[Incubation == 'Initial'])/as.numeric(duration, units = "days"),
-                                net_amm = (amm_gdw - amm_gdw[Incubation == 'Initial'])/as.numeric(duration, units = "days"))
+                                net_amm = (amm_gdw - amm_gdw[Incubation == 'Initial'])/as.numeric(duration, units = "days"),
+                                amm_diff = net_amm[Incubation == 'Nitrate'] - net_amm[Incubation == 'Anoxic'],
+                                no3_diff = net_no3[Incubation == 'Nitrate'] - net_no3[Incubation == 'Anoxic'])
                       )) %>%
   unnest(cols = data)
 
-amm_plot <- ggplot(rates, aes(x = Site, y = amm_gdw)) +
+plots <- list()
+plots[[1]] <- ggplot(rates, aes(x = Site, y = amm_gdw)) +
   geom_col(aes(color = Core, fill = Core), position = position_dodge(0.8), width = 0.7) +
   facet_wrap(~ Incubation, strip.position = "bottom") +
-  theme(strip.placement = "outside")
-no3_plot <- ggplot(rates, aes(x = Site, y = NO3_gdw)) +
+  theme(strip.placement = "outside") + scale_colour_viridis_d() + scale_fill_viridis_d() +
+  labs(title = "Measured Ammonium", x="",y=TeX(r"($\mu$mol $NH_4$ ${g Dry Soil}^-1$)"))
+
+plots[[2]] <- ggplot(rates, aes(x = Site, y = NO3_gdw)) +
   geom_col(aes(color = Core, fill = Core), position = position_dodge(0.8), width = 0.7) +
   facet_wrap(~ Incubation, strip.position = "bottom") +
-  theme(strip.placement = "outside")
-amm_change <- ggplot(filter(rates, Incubation != 'Initial'), aes(x = Site, y = net_amm)) +
+  theme(strip.placement = "outside") + scale_colour_viridis_d() + scale_fill_viridis_d() +
+  labs(title="Measured Nitrate", x="",y=TeX(r"($\mu$mol $NO_3$ ${g Dry Soil}^-1$)"))
+
+plots[[3]] <- ggplot(filter(rates, Incubation != 'Initial'), aes(x = Site, y = net_amm)) +
   geom_col(aes(color = Core, fill = Core), position = position_dodge(0.8), width = 0.7) +
   facet_wrap(~ Incubation, strip.position = "bottom") +
-  theme(strip.placement = "outside")
-no3_change <- ggplot(filter(rates, Incubation != 'Initial'), aes(x = Site, y = net_no3)) +
+  theme(strip.placement = "outside") + scale_colour_viridis_d() + scale_fill_viridis_d() +
+  labs(title="Net Ammonium Change After Incubation",
+        x ="", y = TeX(r"($\mu$mol $NH_4$ ${(g Dry Soil day)}^{-1}$)"))
+  
+plots[[4]] <- ggplot(filter(rates, Incubation != 'Initial'), aes(x = Site, y = net_no3)) +
   geom_col(aes(color = Core, fill = Core), position = position_dodge(0.8), width = 0.7) +
   facet_wrap(~ Incubation, strip.position = "bottom") +
-  theme(strip.placement = "outside")
+  theme(strip.placement = "outside") + scale_colour_viridis_d() + scale_fill_viridis_d() +
+  labs(title="Net Nitrate Change After Incubation", x ="",
+       y = TeX(r"($\mu$mol $NO_3$ ${(g Dry Soil day)}^{-1}$)"))
+
+plots[[5]] <- ggplot(filter(rates, Incubation == 'Nitrate'), aes(x = Site, y = amm_diff)) +
+  geom_col(aes(color = Core, fill = Core), position = position_dodge(0.8), width = 0.7) +
+  theme(axis.text.x = element_text(size=12, face="bold"), axis.text.y = element_text(size=12, face="bold")) +
+  scale_colour_viridis_d() + scale_fill_viridis_d() + labs(title="Difference in Net Ammoninum Rates with added Nitrate",
+       x ="", y = TeX(r"($\mu$mol $NH_4$ ${(g Dry Soil day)}^{-1}$)"))
+
+plots[[6]] <- ggplot(filter(rates, Incubation == 'Nitrate'), aes(x = Site, y = no3_diff)) +
+  geom_col(aes(color = Core, fill = Core), position = position_dodge(0.8), width = 0.7) +
+  theme(axis.text.x = element_text(size=12, face="bold"), 
+  axis.text.y = element_text(size=12, face="bold")) + 
+  scale_colour_viridis_d() + scale_fill_viridis_d() + labs(title="Difference in Net Nitrate Rates with added Nitrate",
+       x ="", y = TeX(r"($\mu$mol $NO_3$ ${(g Dry Soil day)}^{-1}$)"))
+
+for(i in 1:length(plots)){
+  ggsave(plot = plots[[i]], file = paste("plot",i,".pdf",sep=""),path="plots", dpi=300, height=4, width=5, units="in")
+}
 amm_plot
 no3_plot
 amm_change
 no3_change
+amm_diff
+no3_diff
 ```
